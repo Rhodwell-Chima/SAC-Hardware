@@ -265,4 +265,4 @@ MIT
 
 ## Author
 
-Rhodwell — Smart Access Control System
+Rhodwell Chima— Smart Access Control System
