@@ -7,7 +7,7 @@
 #include "portal.h"
 
 // ---------------------------------------------------------------------------
-// Global instances (definitions — declared extern in their headers)
+// Global instances (definitions   declared extern in their headers)
 // ---------------------------------------------------------------------------
 ConfigManager Config;
 ConfigPortal Portal;
@@ -42,18 +42,37 @@ void setup()
   Serial.begin(115200);
   delay(200);
 
-  // ── 1. Load persisted config from NVS ──────────────────────────────────
+  //    1. Load persisted config from NVS
   Config.load();
 
-  // ── 2. Check if user wants to force config portal (hold BOOT button) ───
+  //    2. Check physical button
   pinMode(CONFIG_BUTTON_PIN, INPUT_PULLUP);
-  if (digitalRead(CONFIG_BUTTON_PIN) == LOW)
+  bool buttonHeld = (digitalRead(CONFIG_BUTTON_PIN) == LOW);
+
+  if (buttonHeld)
   {
-    Serial.println("[Setup] Config button held — entering setup portal.");
-    Portal.startAP(); // blocks until saved + reboots
+    Serial.println("[Setup] BOOT button held   entering config portal.");
+    Serial.println("[Setup] Release within 3 s to cancel.");
+    delay(3000);
+
+    if (digitalRead(CONFIG_BUTTON_PIN) == HIGH)
+    {
+      Serial.println("[Setup] Button released   continuing normal boot.");
+    }
+    else
+    {
+      // AsyncWebServer is self-driven; startAP() returns immediately.
+      // We spin here servicing only DNS   the web server needs no polling.
+      Portal.startAP();
+      while (true)
+      {
+        Portal.handleDNS();
+        delay(10);
+      }
+    }
   }
 
-  // ── 3. Hardware init ───────────────────────────────────────────────────
+  //    3. Hardware init
   SPI.begin();
   rfid.PCD_Init();
 
@@ -61,10 +80,11 @@ void setup()
   pinMode(RELAY_PIN, OUTPUT);
   digitalWrite(RELAY_PIN, LOW);
 
-  // ── 4. WiFi ────────────────────────────────────────────────────────────
-  connectWiFi(); // falls through to AP portal if connection fails
+  //    4. WiFi   retry forever, no AP fallback
+  connectWiFi();
 
-  // ── 5. Start LAN config server (non-blocking) ─────────────────────────
+  //    5. Start LAN config server (non-blocking)
+  // AsyncWebServer runs on its own FreeRTOS task   no handleClient() needed.
   Portal.startLAN();
 }
 
@@ -73,8 +93,7 @@ void setup()
 // ---------------------------------------------------------------------------
 void loop()
 {
-  // Let the LAN config portal handle any incoming HTTP requests
-  Portal.handleClient();
+  // AsyncWebServer is fully interrupt/task driven   no portal call needed here.
 
   // Keep relay timing non-blocking
   serviceRelay();
@@ -88,7 +107,7 @@ void loop()
     delay(100);
     digitalWrite(RST_PIN, HIGH);
     delay(100);
-    Serial.println("[Warning] RFID unhealthy — attempting re-initialisation.");
+    Serial.println("[Warning] RFID unhealthy   attempting re-initialisation.");
     SPI.begin();
     rfid.PCD_Init();
     rfid.PCD_WriteRegister(MFRC522::FIFOLevelReg, 0x80);
@@ -113,83 +132,94 @@ void loop()
 
   if (granted)
   {
-    triggerOutput(RELAY_PIN, Config.cfg.doorLockDuration); // ← dynamic
-    Serial.println("[AUTH] Authorised — door unlocked.");
+    triggerOutput(RELAY_PIN, Config.cfg.doorLockDuration);
+    Serial.println("[AUTH] Authorised   door unlocked.");
   }
   else
   {
-    Serial.println("[AUTH] Unauthorised — access denied.");
+    Serial.println("[AUTH] Unauthorised   access denied.");
   }
 
   rfid.PICC_HaltA();
 }
 
-// ==========================================================================================
-// ===================================== WiFi ===============================================
-// ==========================================================================================
+// ===========================================================================
+// WiFi
+// ===========================================================================
 
 /**
  * connectWiFi()
  *
- * Tries to connect using stored credentials. If it can't connect within 20 s
- * it falls back to the SoftAP portal so the user can enter new credentials.
+ * Retries indefinitely   never falls back to SoftAP.
+ * A deauth attack causes the device to keep retrying silently.
+ * The door fails CLOSED (relay stays LOW) while disconnected.
  */
 void connectWiFi()
 {
+  if (!Config.isProvisioned())
+  {
+    Serial.println("[WiFi] No SSID configured. Hold BOOT button on power-on to set up.");
+    Serial.println("[WiFi] Halting   door remains locked.");
+    while (true)
+      delay(1000);
+  }
+
   Serial.printf("[WiFi] Connecting to \"%s\"", Config.cfg.ssid);
   WiFi.mode(WIFI_STA);
   WiFi.begin(Config.cfg.ssid, Config.cfg.password);
 
-  const uint8_t MAX_ATTEMPTS = 40; // 40 × 500 ms = 20 s
-  uint8_t attempts = 0;
-
-  while (WiFi.status() != WL_CONNECTED && attempts < MAX_ATTEMPTS)
+  // Retry forever   no AP fallback (closes deauth attack vector).
+  while (WiFi.status() != WL_CONNECTED)
   {
     delay(500);
     Serial.print(".");
-    attempts++;
+
+    // Re-issue WiFi.begin() every 30 s in case the connection stalled
+    static uint32_t lastBegin = 0;
+    if (millis() - lastBegin > 30000)
+    {
+      lastBegin = millis();
+      WiFi.disconnect();
+      WiFi.begin(Config.cfg.ssid, Config.cfg.password);
+      Serial.print("\n[WiFi] Retrying...");
+    }
   }
 
-  if (WiFi.status() == WL_CONNECTED)
-  {
-    Serial.printf("\n[WiFi] Connected — IP: %s\n", WiFi.localIP().toString().c_str());
-  }
-  else
-  {
-    Serial.println("\n[WiFi] Connection failed — launching setup portal.");
-    Portal.startAP(); // blocks until saved + reboots
-  }
+  Serial.printf("\n[WiFi] Connected   IP: %s\n", WiFi.localIP().toString().c_str());
 }
 
-// ==========================================================================================
-// ===================================== Auth Functions =====================================
-// ==========================================================================================
+// ===========================================================================
+// Auth
+// ===========================================================================
 
 /**
  * checkCardAuth()
  *
- * POSTs UID to the configured server URL, returns true if
- * the server responds with {"granted": true}. Fails closed on any error.
+ * POSTs UID + access_point_id + api_key to the compile-time AUTH_SERVER_URL.
+ * The server URL is hardcoded and cannot be changed at runtime.
+ * The api_key is a shared secret the server validates.
+ * Fails closed on any error.
  */
 bool checkCardAuth(const String &uid)
 {
   if (WiFi.status() != WL_CONNECTED)
   {
-    Serial.println("[AUTH] WiFi not connected — denying by default.");
+    Serial.println("[AUTH] WiFi not connected   denying by default.");
     return false;
   }
 
-  StaticJsonDocument<128> reqDoc;
+  StaticJsonDocument<192> reqDoc;
   reqDoc["card_uid"] = uid;
-  reqDoc["access_point_id"] = Config.cfg.accessPointId; // ← dynamic
+  reqDoc["access_point_id"] = Config.cfg.accessPointId;
+  reqDoc["api_key"] = Config.cfg.apiKey; // shared secret
 
   String reqBody;
   serializeJson(reqDoc, reqBody);
 
   HTTPClient http;
-  http.begin(Config.cfg.authServerUrl); // ← dynamic
+  http.begin(AUTH_SERVER_URL); // compile-time constant
   http.addHeader("Content-Type", "application/json");
-  http.setTimeout(Config.cfg.authTimeoutMs); // ← dynamic
+  http.setTimeout(Config.cfg.authTimeoutMs);
 
   int httpCode = http.POST(reqBody);
 
@@ -203,7 +233,7 @@ bool checkCardAuth(const String &uid)
   String resBody = http.getString();
   http.end();
 
-  Serial.printf("[AUTH] HTTP %d — %s\n", httpCode, resBody.c_str());
+  Serial.printf("[AUTH] HTTP %d   %s\n", httpCode, resBody.c_str());
 
   StaticJsonDocument<256> resDoc;
   DeserializationError err = deserializeJson(resDoc, resBody);
@@ -220,19 +250,27 @@ bool checkCardAuth(const String &uid)
   if (granted)
   {
     String user = resDoc["user"] | "Unknown";
-    Serial.printf("[AUTH] GRANTED — %s (%s)\n", user.c_str(), reason.c_str());
+    Serial.printf("[AUTH] GRANTED   %s (%s)\n", user.c_str(), reason.c_str());
   }
   else
   {
-    Serial.printf("[AUTH] DENIED  — %s\n", reason.c_str());
+    Serial.printf("[AUTH] DENIED    %s\n", reason.c_str());
   }
 
   return granted;
 }
 
-// ==========================================================================================
-// ===================================== RFID Functions =====================================
-// ==========================================================================================
+// ===========================================================================
+// Relay   non-blocking
+// ===========================================================================
+
+/**
+ * triggerOutput()
+ *
+ * Arms the relay and records the deadline. Returns immediately.
+ * If the relay is already active the new trigger is ignored   the door
+ * is already open and re-triggering mid-cycle would extend unpredictably.
+ */
 void triggerOutput(int32_t pin, uint32_t durationMs)
 {
   portENTER_CRITICAL(&gRelayMux);
@@ -240,18 +278,25 @@ void triggerOutput(int32_t pin, uint32_t durationMs)
   if (gRelayActive)
   {
     portEXIT_CRITICAL(&gRelayMux);
-    Serial.println("[Relay] Trigger ignored — relay already active.");
+    Serial.println("[Relay] Trigger ignored   relay already active.");
     return;
   }
 
   gRelayPin = pin;
-  digitalWrite((uint8_t)gRelayPin, HIGH);
   gRelayOffAt = millis() + durationMs;
   gRelayActive = true;
+  digitalWrite((uint8_t)gRelayPin, HIGH);
 
   portEXIT_CRITICAL(&gRelayMux);
 }
 
+/**
+ * serviceRelay()
+ *
+ * Called every loop iteration. Turns the relay off once the deadline passes.
+ * Uses a rollover-safe signed comparison so it handles millis() wraparound
+ * correctly at ~49 days of uptime.
+ */
 void serviceRelay()
 {
   bool shouldTurnOff = false;
@@ -264,7 +309,7 @@ void serviceRelay()
     const uint32_t now = millis();
 
     // Rollover-safe deadline check:
-    // timeout reached when (deadline - now) becomes <= 0 in signed space.
+    // (deadline - now) goes negative in signed space once the deadline passes.
     if ((int32_t)(gRelayOffAt - now) <= 0)
     {
       pinToClear = gRelayPin;
@@ -281,6 +326,10 @@ void serviceRelay()
     digitalWrite((uint8_t)pinToClear, LOW);
   }
 }
+
+// ===========================================================================
+// RFID helpers
+// ===========================================================================
 
 bool isRFIDConnected()
 {
