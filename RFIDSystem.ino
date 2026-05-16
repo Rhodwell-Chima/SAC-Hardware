@@ -17,16 +17,28 @@ MFRC522 rfid(SS_PIN, RST_PIN);
 // ---------------------------------------------------------------------------
 // Forward declarations
 // ---------------------------------------------------------------------------
-bool checkCardAuth(const String& uid);
-void triggerOutput(int pin, int duration);
+bool checkCardAuth(const String &uid);
+void triggerOutput(int32_t pin, uint32_t durationMs);
+void serviceRelay();
 bool isRFIDConnected();
 String getCardUID();
 void connectWiFi();
 
 // ---------------------------------------------------------------------------
+// Relay runtime state (non-blocking)
+// ---------------------------------------------------------------------------
+// These variables are only touched from the main loop today, but a critical
+// section keeps the code safe if an ISR or another task is added later.
+portMUX_TYPE gRelayMux = portMUX_INITIALIZER_UNLOCKED;
+volatile bool gRelayActive = false;
+volatile int32_t gRelayPin = -1;
+volatile uint32_t gRelayOffAt = 0;
+
+// ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
-void setup() {
+void setup()
+{
   Serial.begin(115200);
   delay(200);
 
@@ -35,9 +47,10 @@ void setup() {
 
   // ── 2. Check if user wants to force config portal (hold BOOT button) ───
   pinMode(CONFIG_BUTTON_PIN, INPUT_PULLUP);
-  if (digitalRead(CONFIG_BUTTON_PIN) == LOW) {
+  if (digitalRead(CONFIG_BUTTON_PIN) == LOW)
+  {
     Serial.println("[Setup] Config button held — entering setup portal.");
-    Portal.startAP();  // blocks until saved + reboots
+    Portal.startAP(); // blocks until saved + reboots
   }
 
   // ── 3. Hardware init ───────────────────────────────────────────────────
@@ -49,7 +62,7 @@ void setup() {
   digitalWrite(RELAY_PIN, LOW);
 
   // ── 4. WiFi ────────────────────────────────────────────────────────────
-  connectWiFi();  // falls through to AP portal if connection fails
+  connectWiFi(); // falls through to AP portal if connection fails
 
   // ── 5. Start LAN config server (non-blocking) ─────────────────────────
   Portal.startLAN();
@@ -58,12 +71,17 @@ void setup() {
 // ---------------------------------------------------------------------------
 // Loop
 // ---------------------------------------------------------------------------
-void loop() {
+void loop()
+{
   // Let the LAN config portal handle any incoming HTTP requests
   Portal.handleClient();
 
+  // Keep relay timing non-blocking
+  serviceRelay();
+
   // Check RFID health and attempt re-initialisation if unhealthy
-  if (!isRFIDConnected()) {
+  if (!isRFIDConnected())
+  {
     SPI.end();
     delay(100);
     digitalWrite(RST_PIN, LOW);
@@ -82,7 +100,8 @@ void loop() {
     return;
   }
 
-  if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
+  if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial())
+  {
     delay(50);
     return;
   }
@@ -92,10 +111,13 @@ void loop() {
 
   bool granted = checkCardAuth(uid);
 
-  if (granted) {
-    triggerOutput(RELAY_PIN, Config.cfg.doorLockDuration);  // ← dynamic
+  if (granted)
+  {
+    triggerOutput(RELAY_PIN, Config.cfg.doorLockDuration); // ← dynamic
     Serial.println("[AUTH] Authorised — door unlocked.");
-  } else {
+  }
+  else
+  {
     Serial.println("[AUTH] Unauthorised — access denied.");
   }
 
@@ -112,25 +134,30 @@ void loop() {
  * Tries to connect using stored credentials. If it can't connect within 20 s
  * it falls back to the SoftAP portal so the user can enter new credentials.
  */
-void connectWiFi() {
+void connectWiFi()
+{
   Serial.printf("[WiFi] Connecting to \"%s\"", Config.cfg.ssid);
   WiFi.mode(WIFI_STA);
   WiFi.begin(Config.cfg.ssid, Config.cfg.password);
 
-  const uint8_t MAX_ATTEMPTS = 40;  // 40 × 500 ms = 20 s
+  const uint8_t MAX_ATTEMPTS = 40; // 40 × 500 ms = 20 s
   uint8_t attempts = 0;
 
-  while (WiFi.status() != WL_CONNECTED && attempts < MAX_ATTEMPTS) {
+  while (WiFi.status() != WL_CONNECTED && attempts < MAX_ATTEMPTS)
+  {
     delay(500);
     Serial.print(".");
     attempts++;
   }
 
-  if (WiFi.status() == WL_CONNECTED) {
+  if (WiFi.status() == WL_CONNECTED)
+  {
     Serial.printf("\n[WiFi] Connected — IP: %s\n", WiFi.localIP().toString().c_str());
-  } else {
+  }
+  else
+  {
     Serial.println("\n[WiFi] Connection failed — launching setup portal.");
-    Portal.startAP();  // blocks until saved + reboots
+    Portal.startAP(); // blocks until saved + reboots
   }
 }
 
@@ -144,27 +171,30 @@ void connectWiFi() {
  * POSTs UID to the configured server URL, returns true if
  * the server responds with {"granted": true}. Fails closed on any error.
  */
-bool checkCardAuth(const String& uid) {
-  if (WiFi.status() != WL_CONNECTED) {
+bool checkCardAuth(const String &uid)
+{
+  if (WiFi.status() != WL_CONNECTED)
+  {
     Serial.println("[AUTH] WiFi not connected — denying by default.");
     return false;
   }
 
   StaticJsonDocument<128> reqDoc;
   reqDoc["card_uid"] = uid;
-  reqDoc["access_point_id"] = Config.cfg.accessPointId;  // ← dynamic
+  reqDoc["access_point_id"] = Config.cfg.accessPointId; // ← dynamic
 
   String reqBody;
   serializeJson(reqDoc, reqBody);
 
   HTTPClient http;
-  http.begin(Config.cfg.authServerUrl);  // ← dynamic
+  http.begin(Config.cfg.authServerUrl); // ← dynamic
   http.addHeader("Content-Type", "application/json");
-  http.setTimeout(Config.cfg.authTimeoutMs);  // ← dynamic
+  http.setTimeout(Config.cfg.authTimeoutMs); // ← dynamic
 
   int httpCode = http.POST(reqBody);
 
-  if (httpCode <= 0) {
+  if (httpCode <= 0)
+  {
     Serial.printf("[AUTH] Request failed: %s\n", http.errorToString(httpCode).c_str());
     http.end();
     return false;
@@ -178,7 +208,8 @@ bool checkCardAuth(const String& uid) {
   StaticJsonDocument<256> resDoc;
   DeserializationError err = deserializeJson(resDoc, resBody);
 
-  if (err) {
+  if (err)
+  {
     Serial.printf("[AUTH] JSON parse error: %s\n", err.c_str());
     return false;
   }
@@ -186,10 +217,13 @@ bool checkCardAuth(const String& uid) {
   bool granted = resDoc["granted"] | false;
   String reason = resDoc["reason"] | "UNKNOWN";
 
-  if (granted) {
+  if (granted)
+  {
     String user = resDoc["user"] | "Unknown";
     Serial.printf("[AUTH] GRANTED — %s (%s)\n", user.c_str(), reason.c_str());
-  } else {
+  }
+  else
+  {
     Serial.printf("[AUTH] DENIED  — %s\n", reason.c_str());
   }
 
@@ -199,23 +233,69 @@ bool checkCardAuth(const String& uid) {
 // ==========================================================================================
 // ===================================== RFID Functions =====================================
 // ==========================================================================================
+void triggerOutput(int32_t pin, uint32_t durationMs)
+{
+  portENTER_CRITICAL(&gRelayMux);
 
-void triggerOutput(int pin, int duration) {
-  digitalWrite(pin, HIGH);
-  delay(duration);
-  digitalWrite(pin, LOW);
+  if (gRelayActive)
+  {
+    portEXIT_CRITICAL(&gRelayMux);
+    Serial.println("[Relay] Trigger ignored — relay already active.");
+    return;
+  }
+
+  gRelayPin = pin;
+  digitalWrite((uint8_t)gRelayPin, HIGH);
+  gRelayOffAt = millis() + durationMs;
+  gRelayActive = true;
+
+  portEXIT_CRITICAL(&gRelayMux);
 }
 
-bool isRFIDConnected() {
+void serviceRelay()
+{
+  bool shouldTurnOff = false;
+  int32_t pinToClear = -1;
+
+  portENTER_CRITICAL(&gRelayMux);
+
+  if (gRelayActive)
+  {
+    const uint32_t now = millis();
+
+    // Rollover-safe deadline check:
+    // timeout reached when (deadline - now) becomes <= 0 in signed space.
+    if ((int32_t)(gRelayOffAt - now) <= 0)
+    {
+      pinToClear = gRelayPin;
+      gRelayActive = false;
+      gRelayPin = -1;
+      shouldTurnOff = true;
+    }
+  }
+
+  portEXIT_CRITICAL(&gRelayMux);
+
+  if (shouldTurnOff && pinToClear >= 0)
+  {
+    digitalWrite((uint8_t)pinToClear, LOW);
+  }
+}
+
+bool isRFIDConnected()
+{
   byte version = rfid.PCD_ReadRegister(MFRC522::VersionReg);
   return (version == 0x91 || version == 0x92);
 }
 
-String getCardUID() {
+String getCardUID()
+{
   String uid = "";
   uid.reserve(rfid.uid.size * 2);
-  for (byte i = 0; i < rfid.uid.size; i++) {
-    if (rfid.uid.uidByte[i] < 0x10) uid += "0";
+  for (byte i = 0; i < rfid.uid.size; i++)
+  {
+    if (rfid.uid.uidByte[i] < 0x10)
+      uid += "0";
     uid += String(rfid.uid.uidByte[i], HEX);
   }
   uid.toUpperCase();
