@@ -4,12 +4,22 @@
 #include <Arduino.h>
 
 // ---------------------------------------------------------------------------
-// Hardware pin definitions — these are physically wired, never change at runtime
+// Hardware pins — physically wired, never change at runtime
 // ---------------------------------------------------------------------------
 #define SS_PIN 21
 #define RST_PIN 22
 #define RELAY_PIN 2
-#define CONFIG_BUTTON_PIN 0  // Boot/flash button — hold on power-up to enter portal
+#define CONFIG_BUTTON_PIN 0 // BOOT button — must be held during power-on to enter portal
+
+// ---------------------------------------------------------------------------
+// Auth server URL — compile-time constant, intentionally NOT in the UI
+//
+// Locking this at compile time closes the deauth → rogue-server attack:
+// even if someone accesses the portal they cannot redirect auth requests.
+// To change the URL, you must reflash the firmware — which requires
+// physical access to the device.
+// ---------------------------------------------------------------------------
+#define AUTH_SERVER_URL "http://nixos.local:8000/api/v1/auth/check/"
 
 // ---------------------------------------------------------------------------
 // NVS namespace
@@ -17,49 +27,64 @@
 #define NVS_NAMESPACE "access_ctrl"
 
 // ---------------------------------------------------------------------------
-// Config struct — holds all runtime-configurable values
+// Config struct — only runtime-safe values live here
 // ---------------------------------------------------------------------------
-struct DeviceConfig {
+struct DeviceConfig
+{
   // WiFi
   char ssid[64];
   char password[64];
 
   // Server
-  char authServerUrl[128];
   uint16_t accessPointId;
   uint32_t authTimeoutMs;
 
   // Behaviour
-  uint32_t doorLockDuration;  // ms the relay stays HIGH
+  uint32_t doorLockDuration; // ms the relay stays HIGH
+
+  // Security
+  char portalPassword[32]; // HTTP Basic Auth password for the config portal
+  char apiKey[64];         // Shared secret sent in every auth POST request
 };
 
 // ---------------------------------------------------------------------------
-// Default values — used on first boot or after a factory reset
+// Defaults — first boot or after factory reset
 // ---------------------------------------------------------------------------
 static const DeviceConfig DEFAULT_CONFIG = {
-  .ssid = "iPhone",
-  .password = "87654321",
-  .authServerUrl = "http://nixos.local:8000/api/v1/auth/check/",
-  .accessPointId = 2,
-  .authTimeoutMs = 5000,
-  .doorLockDuration = 2000,
+    .ssid = "",
+    .password = "",
+    .accessPointId = 1,
+    .authTimeoutMs = 5000,
+    .doorLockDuration = 2000,
+
+    // IMPORTANT: change both of these before flashing to production
+    .portalPassword = "changeme",
+    .apiKey = "changeme-api-key-replace-before-flash",
 };
 
 // ---------------------------------------------------------------------------
 // Config manager
 // ---------------------------------------------------------------------------
-class ConfigManager {
+class ConfigManager
+{
 public:
   DeviceConfig cfg;
 
-  // Load from NVS; populate with defaults for any missing key
-  void load() {
+  // Returns true if the device has been configured (has a saved SSID)
+  bool isProvisioned() const
+  {
+    return strlen(cfg.ssid) > 0;
+  }
+
+  void load()
+  {
     Preferences prefs;
-    prefs.begin(NVS_NAMESPACE, true);  // read-only
+    prefs.begin(NVS_NAMESPACE, true);
 
     _readStr(prefs, "ssid", cfg.ssid, DEFAULT_CONFIG.ssid, sizeof(cfg.ssid));
     _readStr(prefs, "password", cfg.password, DEFAULT_CONFIG.password, sizeof(cfg.password));
-    _readStr(prefs, "serverUrl", cfg.authServerUrl, DEFAULT_CONFIG.authServerUrl, sizeof(cfg.authServerUrl));
+    _readStr(prefs, "portalPassword", cfg.portalPassword, DEFAULT_CONFIG.portalPassword, sizeof(cfg.portalPassword));
+    _readStr(prefs, "apiKey", cfg.apiKey, DEFAULT_CONFIG.apiKey, sizeof(cfg.apiKey));
 
     cfg.accessPointId = prefs.getUShort("apId", DEFAULT_CONFIG.accessPointId);
     cfg.authTimeoutMs = prefs.getULong("authTimeout", DEFAULT_CONFIG.authTimeoutMs);
@@ -69,14 +94,15 @@ public:
     Serial.println("[Config] Loaded from NVS.");
   }
 
-  // Persist current cfg values to NVS
-  void save() {
+  void save()
+  {
     Preferences prefs;
-    prefs.begin(NVS_NAMESPACE, false);  // read-write
+    prefs.begin(NVS_NAMESPACE, false);
 
     prefs.putString("ssid", cfg.ssid);
     prefs.putString("password", cfg.password);
-    prefs.putString("serverUrl", cfg.authServerUrl);
+    prefs.putString("portalPassword", cfg.portalPassword);
+    prefs.putString("apiKey", cfg.apiKey);
     prefs.putUShort("apId", cfg.accessPointId);
     prefs.putULong("authTimeout", cfg.authTimeoutMs);
     prefs.putULong("lockDuration", cfg.doorLockDuration);
@@ -85,8 +111,8 @@ public:
     Serial.println("[Config] Saved to NVS.");
   }
 
-  // Erase all keys in the namespace → next boot uses defaults
-  void factoryReset() {
+  void factoryReset()
+  {
     Preferences prefs;
     prefs.begin(NVS_NAMESPACE, false);
     prefs.clear();
@@ -95,17 +121,13 @@ public:
   }
 
 private:
-  void _readStr(Preferences& p, const char* key, char* dest, const char* fallback, size_t maxLen) {
-    if (p.isKey(key)) {
-      String val = p.getString(key, fallback);
-      strncpy(dest, val.c_str(), maxLen - 1);
-      dest[maxLen - 1] = '\0';
-    } else {
-      strncpy(dest, fallback, maxLen - 1);
-      dest[maxLen - 1] = '\0';
-    }
+  void _readStr(Preferences &p, const char *key, char *dest,
+                const char *fallback, size_t maxLen)
+  {
+    String val = p.isKey(key) ? p.getString(key, fallback) : String(fallback);
+    strncpy(dest, val.c_str(), maxLen - 1);
+    dest[maxLen - 1] = '\0';
   }
 };
 
-// Global instance — accessible from all translation units
 extern ConfigManager Config;

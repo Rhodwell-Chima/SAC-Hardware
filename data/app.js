@@ -73,12 +73,21 @@ function sigIcon(rssi) {
 }
 
 // ── WiFi scan ─────────────────────────────────────────────────────────────
+// The server runs WiFi.scanNetworks() asynchronously. If a scan is already
+// in progress it responds 202; we poll every 1.5 s until we get 200.
 let _selectedSSID = null;
+let _scanTimer = null;
 
 function scanNetworks() {
 	const btn = document.getElementById("scan-btn");
 	const status = document.getElementById("scan-status");
 	const list = document.getElementById("network-list");
+
+	// Clear any previous polling timer
+	if (_scanTimer) {
+		clearTimeout(_scanTimer);
+		_scanTimer = null;
+	}
 
 	btn.disabled = true;
 	btn.innerHTML =
@@ -90,9 +99,26 @@ function scanNetworks() {
       <span class="spinner-border spinner-border-sm me-1"></span>Scanning…
     </div>`;
 
+	_pollScan();
+}
+
+function _pollScan() {
 	fetch("/scan")
-		.then((r) => r.json())
+		.then((r) => {
+			// 202 = scan still running on the ESP32, try again shortly
+			if (r.status === 202) {
+				_scanTimer = setTimeout(_pollScan, 1500);
+				return null;
+			}
+			return r.json();
+		})
 		.then((networks) => {
+			if (networks === null) return; // still polling
+
+			const btn = document.getElementById("scan-btn");
+			const status = document.getElementById("scan-status");
+			const list = document.getElementById("network-list");
+
 			btn.disabled = false;
 			btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Scan';
 
@@ -106,7 +132,6 @@ function scanNetworks() {
 			}
 
 			status.textContent = `Found ${networks.length} network${networks.length !== 1 ? "s" : ""}.`;
-
 			list.innerHTML = networks
 				.map((n) => {
 					const safeSsid = n.ssid
@@ -132,6 +157,9 @@ function scanNetworks() {
 				.join("");
 		})
 		.catch(() => {
+			const btn = document.getElementById("scan-btn");
+			const status = document.getElementById("scan-status");
+			const list = document.getElementById("network-list");
 			btn.disabled = false;
 			btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Scan';
 			status.textContent = "Scan failed — try again.";
