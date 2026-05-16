@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en" data-bs-theme="light">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Access Control — Sign In</title>
+		<link rel="stylesheet" href="/bootstrap.min.css" />
+		<link rel="stylesheet" href="/bootstrap-icons.min.css" />
+		<style>
+			html,
+			body {
+				height: 100%;
+			}
+
+			body {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				min-height: 100vh;
+				padding: 16px;
+				transition: background-color 0.2s;
+			}
+
+			.login-card {
+				width: 100%;
+				max-width: 380px;
+			}
+
+			.brand-icon {
+				width: 52px;
+				height: 52px;
+				border-radius: 14px;
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				background: #0d6efd;
+				color: #fff;
+				font-size: 26px;
+				flex-shrink: 0;
+			}
+
+			.theme-toggle {
+				position: fixed;
+				top: 16px;
+				right: 16px;
+			}
+
+			.error-shake {
+				animation: shake 0.35s ease;
+			}
+
+			@keyframes shake {
+				0%,
+				100% {
+					transform: translateX(0);
+				}
+				20% {
+					transform: translateX(-8px);
+				}
+				40% {
+					transform: translateX(8px);
+				}
+				60% {
+					transform: translateX(-5px);
+				}
+				80% {
+					transform: translateX(5px);
+				}
+			}
+		</style>
+	</head>
+	<body>
+		<!-- Theme toggle -->
+		<div class="theme-toggle">
+			<button
+				class="btn btn-sm btn-outline-secondary"
+				id="theme-toggle"
+				title="Toggle theme"
+			>
+				<i class="bi bi-moon-fill" id="theme-icon"></i>
+			</button>
+		</div>
+
+		<div class="login-card">
+			<div class="card shadow-sm border-0">
+				<div class="card-body p-4 p-sm-5">
+					<!-- Brand -->
+					<div class="text-center mb-4">
+						<div class="brand-icon mx-auto mb-3">
+							<i class="bi bi-shield-lock-fill"></i>
+						</div>
+						<h5 class="fw-semibold mb-1">Access Control</h5>
+						<p class="text-muted small mb-0">Sign in to manage this device</p>
+					</div>
+
+					<!-- Error alert -->
+					<div
+						id="error-alert"
+						class="alert alert-danger d-flex align-items-center gap-2 py-2 mb-3"
+						style="display: none !important"
+					>
+						<i class="bi bi-exclamation-circle-fill flex-shrink-0"></i>
+						<span id="error-msg">Invalid username or password.</span>
+					</div>
+
+					<!-- Form -->
+					<div id="login-form">
+						<div class="mb-3">
+							<label class="form-label fw-medium" for="username"
+								>Username</label
+							>
+							<div class="input-group">
+								<span class="input-group-text">
+									<i class="bi bi-person"></i>
+								</span>
+								<input
+									type="text"
+									class="form-control"
+									id="username"
+									autocomplete="username"
+									placeholder="admin"
+									value="admin"
+								/>
+							</div>
+						</div>
+
+						<div class="mb-4">
+							<label class="form-label fw-medium" for="password"
+								>Password</label
+							>
+							<div class="input-group">
+								<span class="input-group-text">
+									<i class="bi bi-lock"></i>
+								</span>
+								<input
+									type="password"
+									class="form-control"
+									id="password"
+									autocomplete="current-password"
+									placeholder="Password"
+								/>
+								<button
+									class="btn btn-outline-secondary"
+									type="button"
+									onclick="togglePw()"
+									tabindex="-1"
+								>
+									<i class="bi bi-eye" id="pw-eye"></i>
+								</button>
+							</div>
+						</div>
+
+						<button
+							class="btn btn-primary w-100"
+							id="signin-btn"
+							onclick="signIn()"
+						>
+							<i class="bi bi-box-arrow-in-right me-1"></i>Sign In
+						</button>
+					</div>
+				</div>
+			</div>
+
+			<p class="text-center text-muted mt-3" style="font-size: 0.75rem">
+				<i class="bi bi-shield-check me-1"></i>
+				Connection secured within your local network
+			</p>
+		</div>
+
+		<script src="/bootstrap.bundle.min.js"></script>
+		<script>
+			// ── Theme ───────────────────────────────────────────────────────────────
+			const html = document.documentElement;
+			const themeIcon = document.getElementById("theme-icon");
+
+			if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+				html.setAttribute("data-bs-theme", "dark");
+				themeIcon.className = "bi bi-sun-fill";
+			}
+
+			document.getElementById("theme-toggle").addEventListener("click", () => {
+				const dark = html.getAttribute("data-bs-theme") === "dark";
+				html.setAttribute("data-bs-theme", dark ? "light" : "dark");
+				themeIcon.className = dark ? "bi bi-moon-fill" : "bi bi-sun-fill";
+			});
+
+			// ── Password visibility ─────────────────────────────────────────────────
+			function togglePw() {
+				const inp = document.getElementById("password");
+				const eye = document.getElementById("pw-eye");
+				inp.type = inp.type === "password" ? "text" : "password";
+				eye.className = inp.type === "text" ? "bi bi-eye-slash" : "bi bi-eye";
+			}
+
+			// ── Enter key submits ───────────────────────────────────────────────────
+			document.getElementById("password").addEventListener("keydown", (e) => {
+				if (e.key === "Enter") signIn();
+			});
+
+			// ── Sign in ─────────────────────────────────────────────────────────────
+			function signIn() {
+				const btn = document.getElementById("signin-btn");
+				const username = document.getElementById("username").value.trim();
+				const password = document.getElementById("password").value;
+
+				if (!username || !password) {
+					showError("Please enter your username and password.");
+					return;
+				}
+
+				btn.disabled = true;
+				btn.innerHTML =
+					'<span class="spinner-border spinner-border-sm me-1"></span>Signing in…';
+
+				fetch("/login", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ username, password }),
+				})
+					.then((r) => r.json())
+					.then((d) => {
+						if (d.ok) {
+							// Redirect to config page — cookie is already set by the server
+							window.location.href = "/";
+						} else {
+							btn.disabled = false;
+							btn.innerHTML =
+								'<i class="bi bi-box-arrow-in-right me-1"></i>Sign In';
+							showError(d.error || "Invalid username or password.");
+							shakeCard();
+						}
+					})
+					.catch(() => {
+						btn.disabled = false;
+						btn.innerHTML =
+							'<i class="bi bi-box-arrow-in-right me-1"></i>Sign In';
+						showError("Could not reach device. Try again.");
+					});
+			}
+
+			// ── Error display ────────────────────────────────────────────────────────
+			function showError(msg) {
+				const el = document.getElementById("error-alert");
+				document.getElementById("error-msg").textContent = msg;
+				el.style.display = "flex";
+			}
+
+			function shakeCard() {
+				const card = document.querySelector(".login-card");
+				card.classList.remove("error-shake");
+				void card.offsetWidth; // reflow to restart animation
+				card.classList.add("error-shake");
+			}
+		</script>
+	</body>
+</html>
