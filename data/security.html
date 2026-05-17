@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="en" data-bs-theme="light">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Access Control — Security</title>
+		<link rel="stylesheet" href="/bootstrap.min.css" />
+		<link rel="stylesheet" href="/bootstrap-icons.min.css" />
+		<link rel="stylesheet" href="/app.css" />
+	</head>
+	<body>
+		<!-- ── Navbar ─────────────────────────────────────────────────── -->
+		<nav class="navbar border-bottom px-3 px-md-4">
+			<div class="d-flex align-items-center gap-2">
+				<span class="brand-icon">
+					<i class="bi bi-shield-lock-fill"></i>
+				</span>
+				<div>
+					<div class="fw-semibold lh-1 nav-title">Access Control</div>
+					<div class="text-muted lh-1 nav-sub">Security Settings</div>
+				</div>
+			</div>
+			<div class="ms-auto d-flex align-items-center gap-2">
+				<a
+					href="/"
+					class="btn btn-sm btn-outline-secondary"
+					title="Back to configuration"
+				>
+					<i class="bi bi-arrow-left me-1"></i>
+					<span class="d-none d-sm-inline">Configuration</span>
+				</a>
+				<button
+					class="btn btn-sm btn-outline-secondary"
+					id="theme-toggle"
+					title="Toggle theme"
+				>
+					<i class="bi bi-moon-fill" id="theme-icon"></i>
+				</button>
+				<a
+					href="/logout"
+					class="btn btn-sm btn-outline-danger"
+					title="Sign out"
+					onclick="return confirm('Sign out?');"
+				>
+					<i class="bi bi-box-arrow-right"></i>
+				</a>
+			</div>
+		</nav>
+
+		<!-- ── Main ───────────────────────────────────────────────────── -->
+		<div class="container py-4 main-container">
+			<form id="security-form" novalidate>
+				<!-- Page heading -->
+				<div class="mb-4">
+					<h5 class="fw-semibold mb-1">
+						<i class="bi bi-key-fill me-2 text-primary"></i>Login Credentials
+					</h5>
+					<p class="text-muted small mb-0">
+						Update the username and password used to access this portal. You
+						will be signed out after a successful change.
+					</p>
+				</div>
+
+				<!-- Verify identity -->
+				<div class="card mb-4 shadow-sm">
+					<div class="card-body p-4">
+						<p class="section-heading">
+							<i class="bi bi-person-check me-1"></i>Verify Identity
+						</p>
+						<p class="text-muted small mb-3">
+							Enter your current credentials to authorise the change.
+						</p>
+
+						<div class="mb-3">
+							<label class="form-label fw-medium">Current Username</label>
+							<div class="input-group">
+								<span class="input-group-text"
+									><i class="bi bi-person"></i
+								></span>
+								<input
+									type="text"
+									class="form-control"
+									id="currentUsername"
+									autocomplete="username"
+									placeholder="Current username"
+									required
+								/>
+								<div class="invalid-feedback">Username is required.</div>
+							</div>
+						</div>
+
+						<div>
+							<label class="form-label fw-medium">Current Password</label>
+							<div class="input-group">
+								<span class="input-group-text"><i class="bi bi-lock"></i></span>
+								<input
+									type="password"
+									class="form-control"
+									id="currentPassword"
+									autocomplete="current-password"
+									placeholder="Current password"
+									required
+								/>
+								<button
+									type="button"
+									class="btn btn-outline-secondary"
+									onclick="togglePw('currentPassword', 'eye0')"
+								>
+									<i class="bi bi-eye" id="eye0"></i>
+								</button>
+								<div class="invalid-feedback">Password is required.</div>
+							</div>
+						</div>
+					</div>
+				</div>
+
+				<!-- New credentials -->
+				<div class="card mb-4 shadow-sm">
+					<div class="card-body p-4">
+						<p class="section-heading">
+							<i class="bi bi-pencil-square me-1"></i>New Credentials
+						</p>
+						<p class="text-muted small mb-3">
+							Leave a field blank to keep its current value.
+						</p>
+
+						<div class="mb-3">
+							<label class="form-label fw-medium">New Username</label>
+							<div class="input-group">
+								<span class="input-group-text"
+									><i class="bi bi-person-fill"></i
+								></span>
+								<input
+									type="text"
+									class="form-control"
+									id="newUsername"
+									autocomplete="new-username"
+									maxlength="31"
+									minlength="3"
+									placeholder="Leave blank to keep current"
+								/>
+								<div class="invalid-feedback">
+									Username must be 3-31 characters.
+								</div>
+							</div>
+							<div class="form-text">
+								3-31 characters, or leave blank to keep current.
+							</div>
+						</div>
+
+						<div class="mb-3">
+							<label class="form-label fw-medium">New Password</label>
+							<div class="input-group">
+								<span class="input-group-text"
+									><i class="bi bi-lock-fill"></i
+								></span>
+								<input
+									type="password"
+									class="form-control"
+									id="newPassword"
+									autocomplete="new-password"
+									maxlength="63"
+									minlength="6"
+									placeholder="Leave blank to keep current"
+								/>
+								<button
+									type="button"
+									class="btn btn-outline-secondary"
+									onclick="togglePw('newPassword', 'eye1')"
+								>
+									<i class="bi bi-eye" id="eye1"></i>
+								</button>
+								<div class="invalid-feedback">
+									Password must be 6-63 characters.
+								</div>
+							</div>
+							<div class="form-text">
+								6-63 characters, or leave blank to keep current.
+							</div>
+						</div>
+
+						<div>
+							<label class="form-label fw-medium">Confirm New Password</label>
+							<div class="input-group">
+								<span class="input-group-text"
+									><i class="bi bi-lock-fill"></i
+								></span>
+								<input
+									type="password"
+									class="form-control"
+									id="confirmPassword"
+									autocomplete="new-password"
+									maxlength="63"
+									placeholder="Repeat new password"
+								/>
+								<button
+									type="button"
+									class="btn btn-outline-secondary"
+									onclick="togglePw('confirmPassword', 'eye2')"
+								>
+									<i class="bi bi-eye" id="eye2"></i>
+								</button>
+								<div class="invalid-feedback">Passwords do not match.</div>
+							</div>
+						</div>
+					</div>
+				</div>
+
+				<!-- Password strength -->
+				<div
+					class="card mb-4 shadow-sm"
+					id="strength-card"
+					style="display: none"
+				>
+					<div class="card-body p-4">
+						<p class="section-heading mb-2">
+							<i class="bi bi-bar-chart me-1"></i>Password Strength
+						</p>
+						<div class="progress mb-2" style="height: 6px">
+							<div
+								class="progress-bar"
+								id="strength-bar"
+								role="progressbar"
+								style="width: 0%"
+							></div>
+						</div>
+						<small id="strength-label" class="text-muted"></small>
+					</div>
+				</div>
+
+				<!-- Inline alert -->
+				<div
+					id="alert"
+					class="alert d-flex align-items-center gap-2 py-2 mb-4"
+					style="display: none !important"
+				>
+					<i class="bi flex-shrink-0" id="alert-icon"></i>
+					<span id="alert-msg"></span>
+				</div>
+
+				<!-- Actions -->
+				<div class="d-grid gap-2 d-sm-flex justify-content-sm-end">
+					<a href="/" class="btn btn-outline-secondary">
+						<i class="bi bi-x-lg me-1"></i>Cancel
+					</a>
+					<button type="submit" class="btn btn-primary px-4" id="save-btn">
+						<i class="bi bi-floppy-fill me-1"></i>Update Credentials
+					</button>
+				</div>
+			</form>
+		</div>
+
+		<!-- Toast -->
+		<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 9999">
+			<div
+				id="main-toast"
+				class="toast align-items-center border-0"
+				role="alert"
+			>
+				<div class="d-flex">
+					<div class="toast-body fw-medium" id="toast-body"></div>
+					<button
+						type="button"
+						class="btn-close btn-close-white me-2 m-auto"
+						data-bs-dismiss="toast"
+					></button>
+				</div>
+			</div>
+		</div>
+
+		<script src="/bootstrap.bundle.min.js"></script>
+		<script>
+			"use strict";
+
+			// ── Theme ─────────────────────────────────────────────────────────────
+			const html = document.documentElement;
+			const themeIcon = document.getElementById("theme-icon");
+
+			if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+				html.setAttribute("data-bs-theme", "dark");
+				themeIcon.className = "bi bi-sun-fill";
+			}
+
+			document.getElementById("theme-toggle").addEventListener("click", () => {
+				const dark = html.getAttribute("data-bs-theme") === "dark";
+				html.setAttribute("data-bs-theme", dark ? "light" : "dark");
+				themeIcon.className = dark ? "bi bi-moon-fill" : "bi bi-sun-fill";
+			});
+
+			// ── Password visibility ────────────────────────────────────────────────
+			function togglePw(inputId, eyeId) {
+				const inp = document.getElementById(inputId);
+				const eye = document.getElementById(eyeId);
+				inp.type = inp.type === "password" ? "text" : "password";
+				eye.className = inp.type === "text" ? "bi bi-eye-slash" : "bi bi-eye";
+			}
+
+			// ── Password strength ──────────────────────────────────────────────────
+			document
+				.getElementById("newPassword")
+				.addEventListener("input", function () {
+					const val = this.value;
+					const card = document.getElementById("strength-card");
+					if (!val) {
+						card.style.display = "none";
+						return;
+					}
+					card.style.display = "block";
+
+					let score = 0;
+					if (val.length >= 8) score++;
+					if (val.length >= 12) score++;
+					if (/[A-Z]/.test(val)) score++;
+					if (/[0-9]/.test(val)) score++;
+					if (/[^A-Za-z0-9]/.test(val)) score++;
+
+					const levels = [
+						{ pct: 20, cls: "bg-danger", label: "Very weak" },
+						{ pct: 40, cls: "bg-danger", label: "Weak" },
+						{ pct: 60, cls: "bg-warning", label: "Fair" },
+						{ pct: 80, cls: "bg-info", label: "Strong" },
+						{ pct: 100, cls: "bg-success", label: "Very strong" },
+					];
+
+					const lvl = levels[Math.min(score, 4)];
+					const bar = document.getElementById("strength-bar");
+					bar.style.width = lvl.pct + "%";
+					bar.className = "progress-bar " + lvl.cls;
+					document.getElementById("strength-label").textContent = lvl.label;
+				});
+
+			// ── Custom validation for password confirmation ──────────────────────────
+			document
+				.getElementById("confirmPassword")
+				.addEventListener("input", function () {
+					const newPw = document.getElementById("newPassword").value;
+					if (newPw && this.value && this.value !== newPw) {
+						this.setCustomValidity("Passwords do not match");
+					} else {
+						this.setCustomValidity("");
+					}
+				});
+
+			// ── Custom validation: at least one field (new username or new password) ──
+			document
+				.getElementById("newUsername")
+				.addEventListener("change", validateAtLeastOne);
+			document
+				.getElementById("newPassword")
+				.addEventListener("change", validateAtLeastOne);
+
+			function validateAtLeastOne() {
+				const form = document.getElementById("security-form");
+				const newUsername = document.getElementById("newUsername").value.trim();
+				const newPassword = document.getElementById("newPassword").value.trim();
+
+				if (!newUsername && !newPassword) {
+					form.classList.add("was-validated");
+				}
+			}
+
+			// ── Alert helper ───────────────────────────────────────────────────────
+			function showAlert(msg, type) {
+				const el = document.getElementById("alert");
+				document.getElementById("alert-icon").className =
+					type === "danger"
+						? "bi bi-exclamation-circle-fill flex-shrink-0"
+						: "bi bi-check-circle-fill flex-shrink-0";
+				el.className = `alert alert-${type} d-flex align-items-center gap-2 py-2 mb-4`;
+				document.getElementById("alert-msg").textContent = msg;
+				el.style.display = "flex";
+				el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+			}
+
+			function hideAlert() {
+				document.getElementById("alert").style.display = "none";
+			}
+
+			// ── Toast ──────────────────────────────────────────────────────────────
+			function showToast(msg, type) {
+				const el = document.getElementById("main-toast");
+				el.className = `toast align-items-center border-0 text-bg-${type}`;
+				document.getElementById("toast-body").textContent = msg;
+				bootstrap.Toast.getOrCreateInstance(el, { delay: 3000 }).show();
+			}
+
+			// ── Form submission ────────────────────────────────────────────────────
+			document
+				.getElementById("security-form")
+				.addEventListener("submit", function (e) {
+					e.preventDefault();
+
+					// Trigger Bootstrap validation
+					if (!this.checkValidity()) {
+						this.classList.add("was-validated");
+						showAlert(
+							"Please fill in all required fields correctly.",
+							"warning",
+						);
+						return;
+					}
+
+					saveCredentials();
+				});
+
+			// ── Save ───────────────────────────────────────────────────────────────
+			function saveCredentials() {
+				hideAlert();
+
+				const currentUsername = document
+					.getElementById("currentUsername")
+					.value.trim();
+				const currentPassword =
+					document.getElementById("currentPassword").value;
+				const newUsername = document.getElementById("newUsername").value.trim();
+				const newPassword = document.getElementById("newPassword").value;
+				const confirmPassword =
+					document.getElementById("confirmPassword").value;
+
+				// Additional client-side validation
+				if (!newUsername && !newPassword) {
+					showAlert("Enter a new username, a new password, or both.", "danger");
+					return;
+				}
+				if (newPassword && newPassword !== confirmPassword) {
+					showAlert("New password and confirmation do not match.", "danger");
+					document.getElementById("confirmPassword").focus();
+					return;
+				}
+				if (newPassword && newPassword.length < 6) {
+					showAlert("New password must be at least 6 characters.", "danger");
+					return;
+				}
+				if (newUsername && newUsername.length < 3) {
+					showAlert("New username must be at least 3 characters.", "danger");
+					return;
+				}
+
+				const btn = document.getElementById("save-btn");
+				btn.disabled = true;
+				btn.innerHTML =
+					'<span class="spinner-border spinner-border-sm me-1"></span>Updating…';
+
+				fetch("/update-credentials", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						currentUsername,
+						currentPassword,
+						newUsername: newUsername || null,
+						newPassword: newPassword || null,
+					}),
+				})
+					.then((r) => r.json())
+					.then((d) => {
+						btn.disabled = false;
+						btn.innerHTML =
+							'<i class="bi bi-floppy-fill me-1"></i>Update Credentials';
+
+						if (d.ok) {
+							showToast("Credentials updated — signing you out…", "success");
+							setTimeout(() => {
+								window.location.href = "/login";
+							}, 2200);
+						} else {
+							showAlert(
+								d.error || "Update failed. Check your current credentials.",
+								"danger",
+							);
+						}
+					})
+					.catch(() => {
+						btn.disabled = false;
+						btn.innerHTML =
+							'<i class="bi bi-floppy-fill me-1"></i>Update Credentials';
+						showAlert("Could not reach device. Try again.", "danger");
+					});
+			}
+		</script>
+	</body>
+</html>
