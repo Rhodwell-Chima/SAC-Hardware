@@ -38,10 +38,10 @@ function loadConfig() {
 			const badge = document.getElementById("mode-badge");
 			if (cfg.mode === "ap") {
 				badge.innerHTML =
-					"<span class='badge bg-warning text-dark ms-1'>Setup Mode</span>";
+					"<span class='badge bg-warning text-dark ms-1' title='Access Point — Setup Mode'><i class='bi bi-wifi'></i></span>";
 			} else {
 				badge.innerHTML =
-					"<span class='badge bg-success ms-1'>Connected</span>";
+					"<span class='badge bg-success ms-1' title='Connected to Network'><i class='bi bi-check-circle'></i></span>";
 			}
 		})
 		.catch(() => showToast("Could not load current config.", "danger"));
@@ -190,17 +190,17 @@ function showToast(msg, type) {
 
 // ── Save ──────────────────────────────────────────────────────────────────
 function saveConfig() {
+	const form = document.getElementById("config-form");
+
+	// Trigger Bootstrap validation
+	if (!form.checkValidity()) {
+		form.classList.add("was-validated");
+		showToast("Please fill in all required fields correctly.", "warning");
+		return;
+	}
+
 	const ssid = document.getElementById("ssid").value.trim();
 	const url = document.getElementById("serverUrl").value.trim();
-
-	if (!ssid) {
-		showToast("SSID cannot be empty.", "danger");
-		return;
-	}
-	if (!url) {
-		showToast("Server URL cannot be empty.", "danger");
-		return;
-	}
 
 	fetch("/save", {
 		method: "POST",
