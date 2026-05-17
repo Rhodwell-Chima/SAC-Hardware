@@ -43,7 +43,8 @@ struct DeviceConfig
   uint32_t doorLockDuration; // ms the relay stays HIGH
 
   // Security
-  char portalPassword[32]; // HTTP Basic Auth password for the config portal
+  char portalUser[32];     // Login username for the config portal
+  char portalPassword[32]; // Login password for the config portal
   char apiKey[64];         // Shared secret sent in every auth POST request
 };
 
@@ -57,8 +58,9 @@ static const DeviceConfig DEFAULT_CONFIG = {
     .authTimeoutMs = 5000,
     .doorLockDuration = 2000,
 
-    // IMPORTANT: change both of these before flashing to production
-    .portalPassword = "changeme",
+    // IMPORTANT: change all three of these before flashing to production
+    .portalUser = "admin",
+    .portalPassword = "admin",
     .apiKey = "changeme-api-key-replace-before-flash",
 };
 
@@ -83,6 +85,7 @@ public:
 
     _readStr(prefs, "ssid", cfg.ssid, DEFAULT_CONFIG.ssid, sizeof(cfg.ssid));
     _readStr(prefs, "password", cfg.password, DEFAULT_CONFIG.password, sizeof(cfg.password));
+    _readStr(prefs, "portalUser", cfg.portalUser, DEFAULT_CONFIG.portalUser, sizeof(cfg.portalUser));
     _readStr(prefs, "portalPassword", cfg.portalPassword, DEFAULT_CONFIG.portalPassword, sizeof(cfg.portalPassword));
     _readStr(prefs, "apiKey", cfg.apiKey, DEFAULT_CONFIG.apiKey, sizeof(cfg.apiKey));
 
@@ -101,6 +104,7 @@ public:
 
     prefs.putString("ssid", cfg.ssid);
     prefs.putString("password", cfg.password);
+    prefs.putString("portalUser", cfg.portalUser);
     prefs.putString("portalPassword", cfg.portalPassword);
     prefs.putString("apiKey", cfg.apiKey);
     prefs.putUShort("apId", cfg.accessPointId);
