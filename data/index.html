@@ -24,6 +24,13 @@
 				</div>
 			</div>
 			<div class="ms-auto d-flex align-items-center gap-2">
+				<a
+					href="/security"
+					class="btn btn-sm btn-outline-secondary"
+					title="Security settings"
+				>
+					<i class="bi bi-gear-fill me-1"></i>
+				</a>
 				<button
 					class="btn btn-sm btn-outline-secondary"
 					id="theme-toggle"
@@ -44,157 +51,187 @@
 
 		<!-- ── Main ───────────────────────────────────────────────────── -->
 		<div class="container py-4 main-container">
-			<!-- WiFi -->
-			<div class="card mb-4 shadow-sm">
-				<div class="card-body p-4">
-					<p class="section-heading">
-						<i class="bi bi-wifi me-1"></i>WiFi Network
-					</p>
+			<form id="config-form" novalidate>
+				<!-- WiFi -->
+				<div class="card mb-4 shadow-sm">
+					<div class="card-body p-4">
+						<p class="section-heading">
+							<i class="bi bi-wifi me-1"></i>WiFi Network
+						</p>
 
-					<!-- Scan -->
-					<div class="mb-3">
-						<div class="d-flex align-items-center justify-content-between mb-2">
-							<label class="form-label mb-0 fw-medium"
-								>Available Networks</label
+						<!-- Scan -->
+						<div class="mb-3">
+							<div
+								class="d-flex align-items-center justify-content-between mb-2"
 							>
-							<button
-								class="btn btn-sm btn-outline-primary"
-								id="scan-btn"
-								onclick="scanNetworks()"
-							>
-								<i class="bi bi-arrow-clockwise me-1"></i>Scan
-							</button>
+								<label class="form-label mb-0 fw-medium"
+									>Available Networks</label
+								>
+								<button
+									type="button"
+									class="btn btn-sm btn-outline-primary"
+									id="scan-btn"
+									onclick="scanNetworks()"
+								>
+									<i class="bi bi-arrow-clockwise me-1"></i>Scan
+								</button>
+							</div>
+							<div
+								id="scan-status"
+								class="text-muted small mb-2"
+								style="display: none"
+							></div>
+							<div id="network-list" class="border rounded p-2 network-list">
+								<div class="text-center text-muted small py-3">
+									<i class="bi bi-wifi-off me-1"></i>Press Scan to find networks
+								</div>
+							</div>
 						</div>
-						<div
-							id="scan-status"
-							class="text-muted small mb-2"
-							style="display: none"
-						></div>
-						<div id="network-list" class="border rounded p-2 network-list">
-							<div class="text-center text-muted small py-3">
-								<i class="bi bi-wifi-off me-1"></i>Press Scan to find networks
+
+						<!-- SSID -->
+						<div class="mb-3">
+							<label class="form-label fw-medium">
+								SSID
+								<span class="text-muted fw-normal small"
+									>(or type manually)</span
+								>
+							</label>
+							<input
+								type="text"
+								class="form-control"
+								id="ssid"
+								maxlength="63"
+								placeholder="Network name"
+								required
+							/>
+							<div class="invalid-feedback">SSID is required.</div>
+						</div>
+
+						<!-- Password -->
+						<div class="mb-1">
+							<label class="form-label fw-medium">Password</label>
+							<div class="input-group">
+								<input
+									type="password"
+									class="form-control"
+									id="password"
+									maxlength="63"
+									placeholder="Leave blank to keep current"
+								/>
+								<button
+									type="button"
+									class="btn btn-outline-secondary"
+									onclick="togglePw()"
+								>
+									<i class="bi bi-eye" id="pw-eye"></i>
+								</button>
+							</div>
+							<div class="form-text">
+								Leave blank to keep the saved password.
 							</div>
 						</div>
 					</div>
+				</div>
 
-					<!-- SSID -->
-					<div class="mb-3">
-						<label class="form-label fw-medium">
-							SSID
-							<span class="text-muted fw-normal small">(or type manually)</span>
-						</label>
-						<input
-							type="text"
-							class="form-control"
-							id="ssid"
-							maxlength="63"
-							placeholder="Network name"
-						/>
-					</div>
+				<!-- Server -->
+				<div class="card mb-4 shadow-sm">
+					<div class="card-body p-4">
+						<p class="section-heading">
+							<i class="bi bi-server me-1"></i>Auth Server
+						</p>
 
-					<!-- Password -->
-					<div class="mb-1">
-						<label class="form-label fw-medium">Password</label>
-						<div class="input-group">
+						<div class="mb-3">
+							<label class="form-label fw-medium">Server URL</label>
 							<input
-								type="password"
+								type="url"
 								class="form-control"
-								id="password"
-								maxlength="63"
-								placeholder="Leave blank to keep current"
+								id="serverUrl"
+								maxlength="255"
+								placeholder="http://example.com/api"
+								required
 							/>
-							<button
-								class="btn btn-outline-secondary"
-								type="button"
-								onclick="togglePw()"
-							>
-								<i class="bi bi-eye" id="pw-eye"></i>
-							</button>
+							<div class="invalid-feedback">Valid server URL is required.</div>
 						</div>
-						<div class="form-text">Leave blank to keep the saved password.</div>
+
+						<div class="row g-3">
+							<div class="col-sm-6">
+								<label class="form-label fw-medium">Access Point ID</label>
+								<input
+									type="number"
+									class="form-control"
+									id="apId"
+									min="1"
+									max="65535"
+									required
+								/>
+								<div class="invalid-feedback">
+									Access Point ID must be between 1 and 65535.
+								</div>
+							</div>
+							<div class="col-sm-6">
+								<label class="form-label fw-medium">
+									Auth Timeout
+									<span class="text-muted fw-normal small">(ms)</span>
+								</label>
+								<input
+									type="number"
+									class="form-control"
+									id="authTimeout"
+									min="1000"
+									max="30000"
+									required
+								/>
+								<div class="invalid-feedback">
+									Auth timeout must be between 1000 and 30000 ms.
+								</div>
+							</div>
+						</div>
 					</div>
 				</div>
-			</div>
 
-			<!-- Server -->
-			<div class="card mb-4 shadow-sm">
-				<div class="card-body p-4">
-					<p class="section-heading">
-						<i class="bi bi-server me-1"></i>Auth Server
-					</p>
-
-					<div class="mb-3">
-						<label class="form-label fw-medium">Server URL</label>
-						<input
-							type="url"
-							class="form-control"
-							id="serverUrl"
-							maxlength="127"
-						/>
-					</div>
-
-					<div class="row g-3">
-						<div class="col-sm-6">
-							<label class="form-label fw-medium">Access Point ID</label>
-							<input
-								type="number"
-								class="form-control"
-								id="apId"
-								min="1"
-								max="65535"
-							/>
-						</div>
-						<div class="col-sm-6">
+				<!-- Behaviour -->
+				<div class="card mb-4 shadow-sm">
+					<div class="card-body p-4">
+						<p class="section-heading">
+							<i class="bi bi-toggles me-1"></i>Behaviour
+						</p>
+						<div>
 							<label class="form-label fw-medium">
-								Auth Timeout
+								Door Unlock Duration
 								<span class="text-muted fw-normal small">(ms)</span>
 							</label>
 							<input
 								type="number"
 								class="form-control"
-								id="authTimeout"
-								min="1000"
+								id="lockDuration"
+								min="500"
 								max="30000"
+								required
 							/>
+							<div class="invalid-feedback">
+								Duration must be between 500 and 30000 ms.
+							</div>
+							<div class="form-text">
+								How long the relay stays open per authorised scan.
+							</div>
 						</div>
 					</div>
 				</div>
-			</div>
 
-			<!-- Behaviour -->
-			<div class="card mb-4 shadow-sm">
-				<div class="card-body p-4">
-					<p class="section-heading">
-						<i class="bi bi-toggles me-1"></i>Behaviour
-					</p>
-					<div>
-						<label class="form-label fw-medium">
-							Door Unlock Duration
-							<span class="text-muted fw-normal small">(ms)</span>
-						</label>
-						<input
-							type="number"
-							class="form-control"
-							id="lockDuration"
-							min="500"
-							max="30000"
-						/>
-						<div class="form-text">
-							How long the relay stays open per authorised scan.
-						</div>
-					</div>
+				<!-- Actions -->
+				<div class="d-grid gap-2 d-sm-flex justify-content-sm-end">
+					<button
+						type="button"
+						class="btn btn-outline-danger"
+						onclick="factoryReset()"
+					>
+						<i class="bi bi-arrow-counterclockwise me-1"></i>Factory Reset
+					</button>
+					<button type="submit" class="btn btn-primary px-4">
+						<i class="bi bi-floppy-fill me-1"></i>Save &amp; Reboot
+					</button>
 				</div>
-			</div>
-
-			<!-- Actions -->
-			<div class="d-grid gap-2 d-sm-flex justify-content-sm-end">
-				<button class="btn btn-outline-danger" onclick="factoryReset()">
-					<i class="bi bi-arrow-counterclockwise me-1"></i>Factory Reset
-				</button>
-				<button class="btn btn-primary px-4" onclick="saveConfig()">
-					<i class="bi bi-floppy-fill me-1"></i>Save &amp; Reboot
-				</button>
-			</div>
+			</form>
 		</div>
 		<!-- /container -->
 
