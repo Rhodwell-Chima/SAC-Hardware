@@ -16,7 +16,6 @@
 #define PORTAL_AP_SSID "AccessCtrl-Setup"
 #define PORTAL_AP_PASSWORD ""
 #define PORTAL_AP_IP "192.168.4.1"
-#define PORTAL_AP_USER "admin"
 #define MDNS_NAME "accesscontrol"
 #define DNS_PORT 53
 #define HTTP_PORT 80
@@ -57,7 +56,7 @@ public:
     Serial.printf("[Portal] AP up         : SSID: %s\n", PORTAL_AP_SSID);
     Serial.printf("[Portal] AP IP         : http://%s/\n", PORTAL_AP_IP);
     Serial.printf("[Portal] Non IP URL    : http://%s.local/\n", MDNS_NAME);
-    Serial.printf("[Portal] Auth          : user=%s\n", PORTAL_AP_USER);
+    Serial.printf("[Portal] Auth          : user=%s\n", Config.cfg.portalUser);
   }
 
   // ── LAN mode ──────────────────────────────────────────────────────────
@@ -240,7 +239,7 @@ private:
           const char *user = doc["username"] | "";
           const char *pass = doc["password"] | "";
 
-          bool userOk = (strcmp(user, PORTAL_AP_USER) == 0);
+          bool userOk = (strcmp(user, Config.cfg.portalUser) == 0);
           bool passOk = (strcmp(pass, Config.cfg.portalPassword) == 0);
 
           if (!userOk || !passOk)
@@ -286,6 +285,90 @@ private:
 
             Serial.println("[Portal] Session cleared — user logged out."); });
 
+    // ── Security page — session required ──────────────────────────────
+    _server->on("/security", HTTP_GET, [this](AsyncWebServerRequest *r)
+                {
+            if (!_requireAuth(r)) return;
+            _serveFile(r, "/security.html"); });
+
+    // ── API: update credentials (session required) ─────────────────────
+    // Requires current credentials before allowing changes.
+    // On success the session is invalidated and the client must log in again.
+    auto *credHandler = new AsyncCallbackJsonWebHandler(
+        "/update-credentials",
+        [this](AsyncWebServerRequest *r, JsonVariant &body)
+        {
+          if (!_requireAuth(r))
+            return;
+
+          JsonObject doc = body.as<JsonObject>();
+
+          const char *curUser = doc["currentUsername"] | "";
+          const char *curPass = doc["currentPassword"] | "";
+
+          // Verify current credentials before allowing any change
+          bool userOk = (strcmp(curUser, Config.cfg.portalUser) == 0);
+          bool passOk = (strcmp(curPass, Config.cfg.portalPassword) == 0);
+
+          if (!userOk || !passOk)
+          {
+            delay(500); // slow brute-force
+            Serial.println("[Portal] Credential update rejected — wrong current credentials.");
+            r->send(401, "application/json",
+                    "{\"ok\":false,\"error\":\"Current username or password is incorrect.\"}");
+            return;
+          }
+
+          // Apply new username if provided
+          bool changed = false;
+
+          const char *newUser = doc["newUsername"] | "";
+          if (newUser && strlen(newUser) > 0)
+          {
+            strlcpy(Config.cfg.portalUser, newUser, sizeof(Config.cfg.portalUser));
+            changed = true;
+            Serial.printf("[Portal] Username updated to: %s\n", newUser);
+          }
+
+          // Apply new password if provided
+          const char *newPass = doc["newPassword"] | "";
+          if (newPass && strlen(newPass) > 0)
+          {
+            if (strlen(newPass) < 6)
+            {
+              r->send(400, "application/json",
+                      "{\"ok\":false,\"error\":\"Password must be at least 6 characters.\"}");
+              return;
+            }
+            strlcpy(Config.cfg.portalPassword, newPass, sizeof(Config.cfg.portalPassword));
+            changed = true;
+            Serial.println("[Portal] Password updated.");
+          }
+
+          if (!changed)
+          {
+            r->send(400, "application/json",
+                    "{\"ok\":false,\"error\":\"No new username or password provided.\"}");
+            return;
+          }
+
+          Config.save();
+
+          // Invalidate the current session — user must log in with new credentials
+          _sessionToken = "";
+          _sessionExpiresAt = 0;
+
+          // Expire the cookie on the client
+          AsyncWebServerResponse *resp =
+              r->beginResponse(200, "application/json", "{\"ok\":true}");
+          resp->addHeader("Set-Cookie",
+                          String(SESSION_COOKIE_NAME) + "=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict");
+          r->send(resp);
+
+          Serial.printf("[Portal] Credentials updated — session invalidated.\n");
+        });
+    _server->addHandler(credHandler);
+
     // ── Config page — session required ────────────────────────────────
     _server->on("/", HTTP_GET, [this](AsyncWebServerRequest *r)
                 {
@@ -297,6 +380,7 @@ private:
             _serveFile(r, "/index.html"); });
 
     // ── Static assets — no auth (Safari-safe, contain no secrets) ─────
+    _server->serveStatic("/security.html", LittleFS, "/security.html");
     _server->serveStatic("/app.css", LittleFS, "/app.css");
     _server->serveStatic("/app.js", LittleFS, "/app.js");
     _server->serveStatic("/bootstrap.min.css", LittleFS, "/bootstrap.min.css");
