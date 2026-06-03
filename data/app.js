@@ -4,6 +4,15 @@
 window.addEventListener("DOMContentLoaded", () => {
 	initTheme();
 	loadConfig();
+
+	// Bind form submit to the JS save handler so the Save button calls saveConfig()
+	const form = document.getElementById("config-form");
+	if (form) {
+		form.addEventListener("submit", (e) => {
+			e.preventDefault();
+			saveConfig();
+		});
+	}
 });
 
 // ── Theme ─────────────────────────────────────────────────────────────────
@@ -26,7 +35,7 @@ function initTheme() {
 
 // ── Load config from device and pre-fill form ─────────────────────────────
 function loadConfig() {
-	fetch("/config")
+	fetch("/config", { credentials: "same-origin" })
 		.then((r) => r.json())
 		.then((cfg) => {
 			document.getElementById("ssid").value = cfg.ssid || "";
@@ -103,17 +112,33 @@ function scanNetworks() {
 }
 
 function _pollScan() {
-	fetch("/scan")
+	fetch("/scan", { credentials: "same-origin" })
 		.then((r) => {
 			// 202 = scan still running on the ESP32, try again shortly
 			if (r.status === 202) {
 				_scanTimer = setTimeout(_pollScan, 1500);
 				return null;
 			}
+
+			// If the request was redirected to login (session missing/expired),
+			// the response will have r.redirected === true (or non-JSON content).
+			if (r.redirected || r.status === 302 || !r.ok) {
+				// Force a visit to the login page so the user can reauthenticate.
+				window.location = "/login";
+				return null;
+			}
+
+			// Expect JSON; guard in case server returned HTML
+			const ct = r.headers.get("Content-Type") || "";
+			if (!ct.includes("application/json")) {
+				window.location = "/login";
+				return null;
+			}
+
 			return r.json();
 		})
 		.then((networks) => {
-			if (networks === null) return; // still polling
+			if (networks === null) return; // still polling or redirected
 
 			const btn = document.getElementById("scan-btn");
 			const status = document.getElementById("scan-status");
@@ -132,6 +157,8 @@ function _pollScan() {
 			}
 
 			status.textContent = `Found ${networks.length} network${networks.length !== 1 ? "s" : ""}.`;
+
+			// Build HTML for each network and return it from the map
 			list.innerHTML = networks
 				.map((n) => {
 					const safeSsid = n.ssid
@@ -139,20 +166,21 @@ function _pollScan() {
 						.replace(/</g, "&lt;")
 						.replace(/"/g, "&quot;");
 					const jsSsid = n.ssid.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-					return `
-          <div class="network-item d-flex align-items-center gap-2 p-2 border mb-1
-                      ${n.ssid === _selectedSSID ? "selected" : ""}"
-               onclick="selectNetwork(this,'${jsSsid}')">
-            <i class="bi ${sigIcon(n.rssi)} signal-icon ${sigClass(n.rssi)}"></i>
-            <div class="flex-grow-1 text-truncate">
-              <div class="fw-medium" style="font-size:.875rem">${safeSsid}</div>
-              <div class="text-muted" style="font-size:.75rem">
-                ${n.rssi} dBm &nbsp;&middot;&nbsp; ch&nbsp;${n.channel}
-              </div>
-            </div>
-            <i class="bi ${n.secure ? "bi-lock-fill" : "bi-unlock"} lock-icon"
-               style="${n.secure ? "" : "opacity:.3"}"></i>
-          </div>`;
+					const lock = n.secure
+						? '<i class="bi bi-lock-fill text-muted ms-2" title="Encrypted"></i>'
+						: "";
+					const sigCls = sigClass(n.rssi);
+					const sigIc = sigIcon(n.rssi);
+					return `<div class="network-item d-flex align-items-center justify-content-between p-2 mb-1 rounded" onclick="selectNetwork(this,'${jsSsid}')">
+                        <div class="d-flex align-items-center gap-2">
+                            <i class="bi ${sigIc} ${sigCls} fs-5"></i>
+                            <div>
+                                <div class="fw-medium">${safeSsid}</div>
+                                <div class="text-muted small">ch ${n.channel} • ${n.rssi} dBm ${lock ? "" : ""}</div>
+                            </div>
+                        </div>
+                        <div>${lock}</div>
+                    </div>`;
 				})
 				.join("");
 		})
@@ -190,43 +218,58 @@ function showToast(msg, type) {
 
 // ── Save ──────────────────────────────────────────────────────────────────
 function saveConfig() {
-	const form = document.getElementById("config-form");
+    const form = document.getElementById("config-form");
 
-	// Trigger Bootstrap validation
-	if (!form.checkValidity()) {
-		form.classList.add("was-validated");
-		showToast("Please fill in all required fields correctly.", "warning");
-		return;
-	}
+    // Trigger Bootstrap validation
+    if (!form.checkValidity()) {
+        form.classList.add("was-validated");
+        showToast("Please fill in all required fields correctly.", "warning");
+        return;
+    }
 
-	const ssid = document.getElementById("ssid").value.trim();
-	const url = document.getElementById("serverUrl").value.trim();
+    const ssid = document.getElementById("ssid").value.trim();
+    const url = document.getElementById("serverUrl").value.trim();
 
-	fetch("/save", {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({
-			ssid,
-			password: document.getElementById("password").value,
-			serverUrl: url,
-			apId: parseInt(document.getElementById("apId").value),
-			authTimeout: parseInt(document.getElementById("authTimeout").value),
-			lockDuration: parseInt(document.getElementById("lockDuration").value),
-		}),
-	})
-		.then((r) => r.json())
-		.then((d) =>
-			d.ok
-				? showToast("Saved — device is rebooting…", "success")
-				: showToast("Error: " + (d.error || "unknown"), "danger"),
-		)
-		.catch(() => showToast("Could not reach device.", "danger"));
+    fetch("/save", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            ssid,
+            password: document.getElementById("password").value,
+            serverUrl: url,
+            apId: parseInt(document.getElementById("apId").value),
+            authTimeout: parseInt(document.getElementById("authTimeout").value),
+            lockDuration: parseInt(document.getElementById("lockDuration").value),
+        }),
+    })
+        .then((r) => {
+            // If redirected to login, go to the login page so the user can reauth
+            if (r.redirected || r.status === 302 || !r.ok) {
+                window.location = "/login";
+                return null;
+            }
+            const ct = r.headers.get("Content-Type") || "";
+            if (!ct.includes("application/json")) {
+                showToast("Unexpected response from device.", "danger");
+                return null;
+            }
+            return r.json();
+        })
+        .then((d) =>
+            d
+                ? d.ok
+                    ? showToast("Saved — device is rebooting…", "success")
+                    : showToast("Error: " + (d.error || "unknown"), "danger")
+                : null,
+        )
+        .catch(() => showToast("Could not reach device.", "danger"));
 }
 
 // ── Factory reset ─────────────────────────────────────────────────────────
 function factoryReset() {
 	if (!confirm("Reset all settings to factory defaults and reboot?")) return;
-	fetch("/reset", { method: "POST" })
+	fetch("/reset", { method: "POST", credentials: "same-origin" })
 		.then(() => showToast("Factory reset — device rebooting…", "warning"))
 		.catch(() => showToast("Could not reach device.", "danger"));
 }
