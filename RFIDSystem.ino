@@ -23,6 +23,8 @@ void serviceRelay();
 bool isRFIDConnected();
 String getCardUID();
 void connectWiFi();
+void relayTask(void *pvParameters);
+void rfidTask(void *pvParameters);
 
 // ---------------------------------------------------------------------------
 // Relay runtime state (non-blocking)
@@ -86,6 +88,10 @@ void setup()
   //    5. Start LAN config server (non-blocking)
   // AsyncWebServer runs on its own FreeRTOS task   no handleClient() needed.
   Portal.startLAN();
+
+  //    6. Start application tasks
+  xTaskCreate(relayTask, "RelayTask", 2048, nullptr, 1, nullptr);
+  xTaskCreate(rfidTask, "RFIDTask", 4096, nullptr, 1, nullptr);
 }
 
 // ---------------------------------------------------------------------------
@@ -93,54 +99,73 @@ void setup()
 // ---------------------------------------------------------------------------
 void loop()
 {
-  // AsyncWebServer is fully interrupt/task driven   no portal call needed here.
+  vTaskDelay(1000 / portTICK_PERIOD_MS);
+}
 
-  // Keep relay timing non-blocking
-  serviceRelay();
+// ---------------------------------------------------------------------------
+// FreeRTOS tasks
+// ---------------------------------------------------------------------------
+void relayTask(void *pvParameters)
+{
+  (void)pvParameters;
 
-  // Check RFID health and attempt re-initialisation if unhealthy
-  if (!isRFIDConnected())
+  for (;;)
   {
-    SPI.end();
-    delay(100);
-    digitalWrite(RST_PIN, LOW);
-    delay(100);
-    digitalWrite(RST_PIN, HIGH);
-    delay(100);
-    Serial.println("[Warning] RFID unhealthy   attempting re-initialisation.");
-    SPI.begin();
-    rfid.PCD_Init();
-    rfid.PCD_WriteRegister(MFRC522::FIFOLevelReg, 0x80);
-    rfid.PCD_AntennaOff();
-    delay(100);
-    rfid.PCD_AntennaOn();
-    rfid.PCD_SetAntennaGain(rfid.RxGain_max);
-    delay(500);
-    return;
+    serviceRelay();
+    vTaskDelay(10 / portTICK_PERIOD_MS);
   }
+}
 
-  if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial())
+void rfidTask(void *pvParameters)
+{
+  (void)pvParameters;
+
+  for (;;)
   {
-    delay(50);
-    return;
+    if (!isRFIDConnected())
+    {
+      SPI.end();
+      vTaskDelay(100 / portTICK_PERIOD_MS);
+      digitalWrite(RST_PIN, LOW);
+      vTaskDelay(100 / portTICK_PERIOD_MS);
+      digitalWrite(RST_PIN, HIGH);
+      vTaskDelay(100 / portTICK_PERIOD_MS);
+      Serial.println("[Warning] RFID unhealthy   attempting re-initialisation.");
+      SPI.begin();
+      rfid.PCD_Init();
+      rfid.PCD_WriteRegister(MFRC522::FIFOLevelReg, 0x80);
+      rfid.PCD_AntennaOff();
+      vTaskDelay(100 / portTICK_PERIOD_MS);
+      rfid.PCD_AntennaOn();
+      rfid.PCD_SetAntennaGain(rfid.RxGain_max);
+      vTaskDelay(500 / portTICK_PERIOD_MS);
+      continue;
+    }
+
+    if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial())
+    {
+      vTaskDelay(50 / portTICK_PERIOD_MS);
+      continue;
+    }
+
+    String uid = getCardUID();
+    Serial.printf("[RFID] Card scanned: %s\n", uid.c_str());
+
+    bool granted = checkCardAuth(uid);
+
+    if (granted)
+    {
+      triggerOutput(RELAY_PIN, Config.cfg.doorLockDuration);
+      Serial.println("[AUTH] Authorised   door unlocked.");
+    }
+    else
+    {
+      Serial.println("[AUTH] Unauthorised   access denied.");
+    }
+
+    rfid.PICC_HaltA();
+    vTaskDelay(50 / portTICK_PERIOD_MS);
   }
-
-  String uid = getCardUID();
-  Serial.printf("[RFID] Card scanned: %s\n", uid.c_str());
-
-  bool granted = checkCardAuth(uid);
-
-  if (granted)
-  {
-    triggerOutput(RELAY_PIN, Config.cfg.doorLockDuration);
-    Serial.println("[AUTH] Authorised   door unlocked.");
-  }
-  else
-  {
-    Serial.println("[AUTH] Unauthorised   access denied.");
-  }
-
-  rfid.PICC_HaltA();
 }
 
 // ===========================================================================
