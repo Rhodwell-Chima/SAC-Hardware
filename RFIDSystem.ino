@@ -5,6 +5,7 @@
 #include <ArduinoJson.h>
 #include "config.h"
 #include "portal.h"
+#include "rfid.h"
 
 // ---------------------------------------------------------------------------
 // Global instances (definitions   declared extern in their headers)
@@ -75,10 +76,8 @@ void setup()
   }
 
   //    3. Hardware init
-  SPI.begin();
-  rfid.PCD_Init();
+  initRFID();
 
-  pinMode(RST_PIN, OUTPUT);
   pinMode(RELAY_PIN, OUTPUT);
   digitalWrite(RELAY_PIN, LOW);
 
@@ -91,7 +90,7 @@ void setup()
 
   //    6. Start application tasks
   xTaskCreate(relayTask, "RelayTask", 2048, nullptr, 1, nullptr);
-  xTaskCreate(rfidTask, "RFIDTask", 4096, nullptr, 1, nullptr);
+  startRFIDTask();
 }
 
 // ---------------------------------------------------------------------------
@@ -113,58 +112,6 @@ void relayTask(void *pvParameters)
   {
     serviceRelay();
     vTaskDelay(10 / portTICK_PERIOD_MS);
-  }
-}
-
-void rfidTask(void *pvParameters)
-{
-  (void)pvParameters;
-
-  for (;;)
-  {
-    if (!isRFIDConnected())
-    {
-      SPI.end();
-      vTaskDelay(100 / portTICK_PERIOD_MS);
-      digitalWrite(RST_PIN, LOW);
-      vTaskDelay(100 / portTICK_PERIOD_MS);
-      digitalWrite(RST_PIN, HIGH);
-      vTaskDelay(100 / portTICK_PERIOD_MS);
-      Serial.println("[Warning] RFID unhealthy   attempting re-initialisation.");
-      SPI.begin();
-      rfid.PCD_Init();
-      rfid.PCD_WriteRegister(MFRC522::FIFOLevelReg, 0x80);
-      rfid.PCD_AntennaOff();
-      vTaskDelay(100 / portTICK_PERIOD_MS);
-      rfid.PCD_AntennaOn();
-      rfid.PCD_SetAntennaGain(rfid.RxGain_max);
-      vTaskDelay(500 / portTICK_PERIOD_MS);
-      continue;
-    }
-
-    if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial())
-    {
-      vTaskDelay(50 / portTICK_PERIOD_MS);
-      continue;
-    }
-
-    String uid = getCardUID();
-    Serial.printf("[RFID] Card scanned: %s\n", uid.c_str());
-
-    bool granted = checkCardAuth(uid);
-
-    if (granted)
-    {
-      triggerOutput(RELAY_PIN, Config.cfg.doorLockDuration);
-      Serial.println("[AUTH] Authorised   door unlocked.");
-    }
-    else
-    {
-      Serial.println("[AUTH] Unauthorised   access denied.");
-    }
-
-    rfid.PICC_HaltA();
-    vTaskDelay(50 / portTICK_PERIOD_MS);
   }
 }
 
@@ -350,28 +297,4 @@ void serviceRelay()
   {
     digitalWrite((uint8_t)pinToClear, LOW);
   }
-}
-
-// ===========================================================================
-// RFID helpers
-// ===========================================================================
-
-bool isRFIDConnected()
-{
-  byte version = rfid.PCD_ReadRegister(MFRC522::VersionReg);
-  return (version == 0x91 || version == 0x92);
-}
-
-String getCardUID()
-{
-  String uid = "";
-  uid.reserve(rfid.uid.size * 2);
-  for (byte i = 0; i < rfid.uid.size; i++)
-  {
-    if (rfid.uid.uidByte[i] < 0x10)
-      uid += "0";
-    uid += String(rfid.uid.uidByte[i], HEX);
-  }
-  uid.toUpperCase();
-  return uid;
 }
