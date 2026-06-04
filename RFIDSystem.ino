@@ -1,38 +1,26 @@
 #include <SPI.h>
-#include <MFRC522.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include "config.h"
 #include "portal.h"
+#include "rfid.h"
+#include "relay.h"
 
 // ---------------------------------------------------------------------------
-// Global instances (definitions   declared extern in their headers)
+// Global instances (definitions declared extern in their headers)
 // ---------------------------------------------------------------------------
 ConfigManager Config;
 ConfigPortal Portal;
-
-MFRC522 rfid(SS_PIN, RST_PIN);
 
 // ---------------------------------------------------------------------------
 // Forward declarations
 // ---------------------------------------------------------------------------
 bool checkCardAuth(const String &uid);
-void triggerOutput(int32_t pin, uint32_t durationMs);
-void serviceRelay();
 bool isRFIDConnected();
 String getCardUID();
 void connectWiFi();
-
-// ---------------------------------------------------------------------------
-// Relay runtime state (non-blocking)
-// ---------------------------------------------------------------------------
-// These variables are only touched from the main loop today, but a critical
-// section keeps the code safe if an ISR or another task is added later.
-portMUX_TYPE gRelayMux = portMUX_INITIALIZER_UNLOCKED;
-volatile bool gRelayActive = false;
-volatile int32_t gRelayPin = -1;
-volatile uint32_t gRelayOffAt = 0;
+void rfidTask(void *pvParameters);
 
 // ---------------------------------------------------------------------------
 // Setup
@@ -62,7 +50,7 @@ void setup()
     else
     {
       // AsyncWebServer is self-driven; startAP() returns immediately.
-      // We spin here servicing only DNS   the web server needs no polling.
+      // We spin here servicing only DNS — the web server needs no polling.
       Portal.startAP();
       while (true)
       {
@@ -73,19 +61,21 @@ void setup()
   }
 
   //    3. Hardware init
-  SPI.begin();
-  rfid.PCD_Init();
+  initRFID();
 
-  pinMode(RST_PIN, OUTPUT);
-  pinMode(RELAY_PIN, OUTPUT);
-  digitalWrite(RELAY_PIN, LOW);
+  // initialize relay module (replaces direct pin handling + service task)
+  initRelay();
 
   //    4. WiFi   retry forever, no AP fallback
   connectWiFi();
 
   //    5. Start LAN config server (non-blocking)
-  // AsyncWebServer runs on its own FreeRTOS task   no handleClient() needed.
+  // AsyncWebServer runs on its own FreeRTOS task — no handleClient() needed.
   Portal.startLAN();
+
+  //    6. Start application tasks
+  startRelayTask();
+  startRFIDTask();
 }
 
 // ---------------------------------------------------------------------------
@@ -93,67 +83,13 @@ void setup()
 // ---------------------------------------------------------------------------
 void loop()
 {
-  // AsyncWebServer is fully interrupt/task driven   no portal call needed here.
-
-  // Keep relay timing non-blocking
-  serviceRelay();
-
-  // Check RFID health and attempt re-initialisation if unhealthy
-  if (!isRFIDConnected())
-  {
-    SPI.end();
-    delay(100);
-    digitalWrite(RST_PIN, LOW);
-    delay(100);
-    digitalWrite(RST_PIN, HIGH);
-    delay(100);
-    Serial.println("[Warning] RFID unhealthy   attempting re-initialisation.");
-    SPI.begin();
-    rfid.PCD_Init();
-    rfid.PCD_WriteRegister(MFRC522::FIFOLevelReg, 0x80);
-    rfid.PCD_AntennaOff();
-    delay(100);
-    rfid.PCD_AntennaOn();
-    rfid.PCD_SetAntennaGain(rfid.RxGain_max);
-    delay(500);
-    return;
-  }
-
-  if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial())
-  {
-    delay(50);
-    return;
-  }
-
-  String uid = getCardUID();
-  Serial.printf("[RFID] Card scanned: %s\n", uid.c_str());
-
-  bool granted = checkCardAuth(uid);
-
-  if (granted)
-  {
-    triggerOutput(RELAY_PIN, Config.cfg.doorLockDuration);
-    Serial.println("[AUTH] Authorised   door unlocked.");
-  }
-  else
-  {
-    Serial.println("[AUTH] Unauthorised   access denied.");
-  }
-
-  rfid.PICC_HaltA();
+  vTaskDelay(1000 / portTICK_PERIOD_MS);
 }
 
 // ===========================================================================
 // WiFi
 // ===========================================================================
 
-/**
- * connectWiFi()
- *
- * Retries indefinitely   never falls back to SoftAP.
- * A deauth attack causes the device to keep retrying silently.
- * The door fails CLOSED (relay stays LOW) while disconnected.
- */
 void connectWiFi()
 {
   if (!Config.isProvisioned())
@@ -168,7 +104,7 @@ void connectWiFi()
   WiFi.mode(WIFI_STA);
   WiFi.begin(Config.cfg.ssid, Config.cfg.password);
 
-  // Retry forever   no AP fallback (closes deauth attack vector).
+  // Retry forever — no AP fallback (closes deauth attack vector).
   while (WiFi.status() != WL_CONNECTED)
   {
     delay(500);
@@ -192,14 +128,6 @@ void connectWiFi()
 // Auth
 // ===========================================================================
 
-/**
- * checkCardAuth()
- *
- * POSTs UID + access_point_id + api_key to the compile-time AUTH_SERVER_URL.
- * The server URL is hardcoded and cannot be changed at runtime.
- * The api_key is a shared secret the server validates.
- * Fails closed on any error.
- */
 bool checkCardAuth(const String &uid)
 {
   if (WiFi.status() != WL_CONNECTED)
@@ -258,95 +186,4 @@ bool checkCardAuth(const String &uid)
   }
 
   return granted;
-}
-
-// ===========================================================================
-// Relay   non-blocking
-// ===========================================================================
-
-/**
- * triggerOutput()
- *
- * Arms the relay and records the deadline. Returns immediately.
- * If the relay is already active the new trigger is ignored   the door
- * is already open and re-triggering mid-cycle would extend unpredictably.
- */
-void triggerOutput(int32_t pin, uint32_t durationMs)
-{
-  portENTER_CRITICAL(&gRelayMux);
-
-  if (gRelayActive)
-  {
-    portEXIT_CRITICAL(&gRelayMux);
-    Serial.println("[Relay] Trigger ignored   relay already active.");
-    return;
-  }
-
-  gRelayPin = pin;
-  gRelayOffAt = millis() + durationMs;
-  gRelayActive = true;
-  digitalWrite((uint8_t)gRelayPin, HIGH);
-
-  portEXIT_CRITICAL(&gRelayMux);
-}
-
-/**
- * serviceRelay()
- *
- * Called every loop iteration. Turns the relay off once the deadline passes.
- * Uses a rollover-safe signed comparison so it handles millis() wraparound
- * correctly at ~49 days of uptime.
- */
-void serviceRelay()
-{
-  bool shouldTurnOff = false;
-  int32_t pinToClear = -1;
-
-  portENTER_CRITICAL(&gRelayMux);
-
-  if (gRelayActive)
-  {
-    const uint32_t now = millis();
-
-    // Rollover-safe deadline check:
-    // (deadline - now) goes negative in signed space once the deadline passes.
-    if ((int32_t)(gRelayOffAt - now) <= 0)
-    {
-      pinToClear = gRelayPin;
-      gRelayActive = false;
-      gRelayPin = -1;
-      shouldTurnOff = true;
-    }
-  }
-
-  portEXIT_CRITICAL(&gRelayMux);
-
-  if (shouldTurnOff && pinToClear >= 0)
-  {
-    digitalWrite((uint8_t)pinToClear, LOW);
-  }
-}
-
-// ===========================================================================
-// RFID helpers
-// ===========================================================================
-
-bool isRFIDConnected()
-{
-  byte version = rfid.PCD_ReadRegister(MFRC522::VersionReg);
-  return (version == 0x91 || version == 0x92);
-}
-
-String getCardUID()
-{
-  String uid = "";
-  uid.reserve(rfid.uid.size * 2);
-  for (byte i = 0; i < rfid.uid.size; i++)
-  {
-    if (rfid.uid.uidByte[i] < 0x10)
-      uid += "0";
-    uid += String(rfid.uid.uidByte[i], HEX);
-  }
-  uid.toUpperCase();
-  return uid;
 }
